@@ -1,0 +1,10 @@
+## SCRIPTS GENERATOR CONFIG
+fmd_file_path = '../../META/opersvodka/fmdOPERSVODKA.xlsx'
+scripts_path = '../../DWH'
+project = 'OPERSVODKA/'
+
+sql_templates_file = './sql_templates.toml'
+airflow_templates_file = './airflow_templates.toml'
+
+folder_marts = '/Users/artemiykozyr/Documents/sibur/ETL/Data/002-opersvodka/6-MART/'
+folder_dq = '/Users/artemiykozyr/Documents/sibur/ETL/Data/002-opersvodka/6-MART//'

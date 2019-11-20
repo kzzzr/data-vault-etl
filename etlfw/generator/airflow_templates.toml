@@ -1,0 +1,20 @@
+
+[OPERATOR]
+
+"VerticaOperatorExtended" = """
+{task_name} = VerticaOperatorExtended(
+    dag=dag,
+    task_id='{task_name}',
+    sql='DWH/OPERSVODKA/{folder}/{stage}/{file}',
+    log_meta={{
+        'log_table' : 'OPERSVOD_STG.ETL_LOAD_LOG',
+        'stage' : '{stage}',
+        'obj' : '{obj}',
+        'step' : '{step}',
+        'rowcount' : '',
+        'status' : 'OK',
+        'descr' : '{descr}'
+    }}
+)
+
+"""

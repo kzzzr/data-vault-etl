@@ -1,0 +1,64 @@
+
+# Source Data params
+
+[excel]
+
+    [excel.calendar]
+        path = "../../META/opersvodka/XLS_load"
+        filename = "data.xlsx"
+        sheet = "CALENDAR"
+        target_schema = "STG_OPERSVODKA"
+        target_table = "STG_DUMMY_CALENDAR"
+
+    [excel.reference]
+        path = "../../META/opersvodka/XLS_load"
+        filename = "data.xlsx"
+        sheet = "REFERENCE"
+        target_schema = "STG_OPERSVODKA"
+        target_table = "STG_REFERENCE"
+
+    [excel.comments]
+        path = "../../META/opersvodka/XLS_load"
+        filename = "OPERSVOD_STG_COMMENTS.xlsx"
+        sheet = "STG_COMMENTS"
+        target_schema = "STG_OPERSVODKA"
+        target_table = "STG_COMMENTS"
+
+    [excel.comments_mock]
+        path = "../../META/opersvodka/XLS_load"
+        filename = "OPERSVOD_STG_COMMENTS.xlsx"
+        sheet = "STG_COMMENTS"
+        target_schema = "STG_OPERSVODKA"
+        target_table = "STG_COMMENTS"
+
+[sapmii]
+
+    [sapmii.DataLake_report]
+        target_schema = "STG_OPERSVODKA"
+        target_table = "STG_STG_HQ_REPORT"
+        endpoint = "http://sapmii.sibur.local:52000/XMII/SOAPRunner/DATA_LAKE/DataLake_report"
+        report = "STG_HQ_REPORT"
+        shift = "-1"
+        sap_usr_env = "SAPLOGIN"
+        sap_pwd_env = "SAPPASSWORD"
+        mock_file = "../../META/opersvodka/XML_load/2019-05-24.csv"
+        request_body = """
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xmii="http://www.sap.com/xMII">
+               <soapenv:Header/>
+               <soapenv:Body>
+                  <xmii:XacuteRequest>
+                     <!--Optional:-->
+                     <xmii:LoginName>{sap_usr}</xmii:LoginName>
+                     <!--Optional:-->
+                     <xmii:LoginPassword>{sap_pwd}</xmii:LoginPassword>
+                     <!--Optional:-->
+                     <xmii:InputParams>
+                        <!--Optional:-->
+                        <xmii:iv_bdate_shift>{shift}</xmii:iv_bdate_shift>
+                        <!--Optional:-->
+                        <xmii:iv_report>{report}</xmii:iv_report>
+                     </xmii:InputParams>
+                  </xmii:XacuteRequest>
+               </soapenv:Body>
+            </soapenv:Envelope>
+            """

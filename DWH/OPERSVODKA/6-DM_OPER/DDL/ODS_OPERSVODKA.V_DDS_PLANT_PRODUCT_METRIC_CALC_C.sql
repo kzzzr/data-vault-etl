@@ -1,0 +1,23 @@
+CREATE OR REPLACE VIEW ODS_OPERSVODKA.V_DDS_PLANT_PRODUCT_METRIC_CALC_C AS
+SELECT
+	dds.FILE_ID
+	, dds.LOAD_TS
+	, dds.DT
+	, dds.ID_PLANT_PRODUCT
+	, dds.FACTORY
+	, dds.PLANT
+	, dds.PRODUCT
+	, dds.BP
+	, dds.PPR
+	, dds.PLAN
+	, dds.FORECAST
+	, dds.FACT
+	, isnull(png.BP, sog.BP) AS BP_C
+	, isnull(png.PLAN, sog.PLAN) AS PLAN_C
+	, isnull(png.PPR, sog.PPR) AS PPR_C
+	, isnull(png.FORECAST, sog.FORECAST) AS FORECAST_C
+	, isnull(png.FACT, sog.FACT) AS FACT_C
+FROM ODS_OPERSVODKA.DM_PLANT_PRODUCT_METRIC_CALC dds
+	LEFT JOIN ODS_OPERSVODKA.DM_PLANT_PRODUCT_METRIC_CALC png ON png.DT = dds.DT AND png.PLANT = dds.PLANT AND png.PRODUCT = 'ПНГ' AND dds.PRODUCT = 'С3+ в ПНГ'
+	LEFT JOIN ODS_OPERSVODKA.DM_PLANT_PRODUCT_METRIC_CALC sog ON sog.DT = dds.DT AND sog.PLANT = dds.PLANT AND sog.PRODUCT = 'СОГ' AND dds.PRODUCT = 'С3+ в СОГ'
+;

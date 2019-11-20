@@ -1,0 +1,69 @@
+
+# DEFAULT VERTICA DATABASE SERVER TAG
+dbtag = "cloud"
+
+project_directory = "/Users/artemiykozyr/Documents/sibur/git/DWH/OPERSVODKA"
+
+# VERTICA servers connection params
+[server]
+  [server.dev]
+  host = "10.2.75.8"
+  db = "devdb"
+  userType = "env"
+  user = ""
+  userEnvVar = "PY_VE_USER"
+  passwordType =  "env"
+  password = ""
+  passwordEnvVar = "PY_VE_PASSWORD"
+
+  [server.cloud]
+  host = "95.216.198.229"
+  db = "dev1"
+  userType = "env"
+  user = ""
+  userEnvVar = "CLOUD_VE_USER"
+  passwordType =  "env"
+  password = ""
+  passwordEnvVar = "CLOUD_VE_PASSWORD"
+
+# Logging params
+[log]
+folder = "airflow/etlfw/LOGS"
+log_level = "INFO"
+
+# Metadata context to log every action
+[metadir]
+    [metadir.DDL]
+    MODE = 'DDL'
+    OBJECT = '{folder}'
+    STEP = '{file}'
+    DESCRIPTION = 'CREATING OBJECT : {file}'
+    RE = "[0-7]-.*"
+
+    [metadir.TRUNCATE]
+    MODE = 'TRUNCATE'
+    OBJECT = '{folder}'
+    STEP = '{file}'
+    DESCRIPTION = 'TRUNCATE STAGE TABLE : {file}'
+    RE = "1-.*"
+
+    [metadir.DML]
+    MODE = 'DML'
+    OBJECT = '{folder}'
+    STEP = '{file}'
+    DESCRIPTION = 'LOAD DATA WAREHOUSE : {file}'
+    RE = "[1-5]-.*"
+
+    [metadir.MART]
+    MODE = 'MART'
+    OBJECT = '{folder}'
+    STEP = '{file}'
+    DESCRIPTION = 'LOAD DATA MART : {file}'
+    RE = "6-.*"
+
+    [metadir.DQ]
+    MODE = 'DQ'
+    OBJECT = '{folder}'
+    STEP = '{file}'
+    DESCRIPTION = 'DATA QUALITY : {file}'
+    RE = "7-.*"

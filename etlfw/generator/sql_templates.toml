@@ -1,0 +1,403 @@
+
+[META]
+"{meta_schema}.ETL_LOAD_LOG.sql" = """
+CREATE TABLE IF NOT EXISTS {meta_schema}.ETL_LOAD_LOG (
+	LOAD_TS TIMESTAMP,
+	MODE VARCHAR(64),
+	OBJECT VARCHAR(256),
+    STEP VARCHAR(256),
+	ROWCOUNT INTEGER,
+    STATUS VARCHAR(64),
+	DESCRIPTION VARCHAR(2048)
+)
+ORDER BY LOAD_TS, OBJECT, STEP
+UNSEGMENTED ALL NODES
+;
+"""
+
+"{meta_schema}.ETL_FILE_LOAD.sql" = """
+CREATE TABLE IF NOT EXISTS {meta_schema}.ETL_FILE_LOAD (
+	FILE_ID AUTO_INCREMENT(1, 1, 1) NOT NULL,
+	LOAD_TS TIMESTAMP NOT NULL,
+	SRC_SYSTEM VARCHAR(128) NOT NULL,
+	FILE_NAME VARCHAR(64) NOT NULL,
+	BUSINESS_DT DATE NOT NULL,
+	PRIMARY KEY (FILE_ID) ENABLED
+)
+ORDER BY
+	FILE_ID ,
+	SRC_SYSTEM ,
+	FILE_NAME ,
+	BUSINESS_DT
+UNSEGMENTED ALL NODES
+;
+"""
+
+"{meta_schema}.V_ETL_FILE_LOAD.sql" = """
+CREATE OR REPLACE VIEW {meta_schema}.V_ETL_FILE_LOAD AS
+SELECT
+	FILE_ID ,
+	LOAD_TS ,
+	SRC_SYSTEM ,
+	FILE_NAME ,
+	BUSINESS_DT
+FROM {meta_schema}.ETL_FILE_LOAD
+LIMIT 1 OVER (PARTITION BY SRC_SYSTEM, FILE_NAME, BUSINESS_DT ORDER BY LOAD_TS DESC)
+;
+"""
+
+"{meta_schema}.DQ_LOG.sql" = """
+CREATE TABLE IF NOT EXISTS {meta_schema}.DQ_LOG (
+	LOAD_TS TIMESTAMP,
+	OBJECT VARCHAR(256),
+    DQ_NAME VARCHAR(256),
+	METRIC FLOAT,
+    STATUS VARCHAR(64),
+	DESCRIPTION VARCHAR(2048)
+)
+ORDER BY LOAD_TS, OBJECT
+UNSEGMENTED ALL NODES
+;
+"""
+
+[STAGE]
+[STAGE.DDL]
+"{stage_table}" = """
+DROP TABLE IF EXISTS {stage_schema}.{stage_table} ;
+
+CREATE TABLE IF NOT EXISTS {stage_schema}.{stage_table} (
+	{columns_definition}
+)
+ORDER BY {columns_ordered_by}
+{segmentation_clause} ALL NODES
+;
+"""
+
+[STAGE.TRUNCATE]
+"TRUNCATE_{stage_schema}.{stage_table}" = """
+TRUNCATE TABLE {stage_schema}.{stage_table}
+;
+"""
+
+[STAGE.DML]
+"{stage_table}_DQ_SOURCE_TARGET" = """
+INSERT INTO {stage_schema}.DQ_LOG (
+	LOAD_TS,
+	OBJECT,
+    DQ_NAME,
+	METRIC,
+    STATUS,
+	DESCRIPTION
+)
+SELECT DISTINCT
+	GETDATE()
+	, '{stage_table}' AS OBJECT
+	, 'COMPARE SOURCE AND STAGE' AS DQ_NAME
+	, SOURCE_COUNT.ROWCOUNT - STAGE_COUNT.ROWCOUNT AS METRIC
+	, CASE (SOURCE_COUNT.ROWCOUNT - STAGE_COUNT.ROWCOUNT) WHEN 0 THEN 'OK' ELSE 'WARN' END AS STATUS
+	, 'SOURCE.ROWCOUNT - STAGE.ROWCOUNT. OK=0. COMPARE NUMBER OF ROWS IN SOURCE AND NUMBER OF ROWS LOADED TO STAGE' AS DESCRIPTION
+FROM {stage_schema}.ETL_LOAD_LOG
+	CROSS JOIN (SELECT count(1) AS ROWCOUNT FROM {stage_schema}.{stage_table}) AS STAGE_COUNT
+	CROSS JOIN (SELECT ROWCOUNT FROM {stage_schema}.ETL_LOAD_LOG
+				WHERE OBJECT = '{stage_table}'
+				AND STEP = 'LOAD FILE'
+				LIMIT 1 OVER (PARTITION BY OBJECT ORDER BY LOAD_TS DESC)) AS SOURCE_COUNT
+;
+"""
+
+"{stage_table}_DQ_FILE_EXISTS" = """
+INSERT INTO {stage_schema}.DQ_LOG (
+	LOAD_TS,
+	OBJECT,
+    DQ_NAME,
+	METRIC,
+    STATUS,
+	DESCRIPTION
+)
+SELECT DISTINCT
+	GETDATE()
+	, FILE_REG.STAGE_TABLE AS OBJECT
+	, 'CHECK IF FILE ALREADY EXISTS' AS DQ_NAME
+	, FILE_REG.FILE_COUNT AS METRIC
+	, CASE FILE_REG.FILE_COUNT WHEN 0 THEN 'OK' ELSE 'WARN' END AS STATUS
+	, 'CHECK IF FILE FOR BUSINESS DATE FROM GIVEN DATA SOURCE ALREADY BEEN REGISTERED. OK=0 (NEW FILE)' AS DESCRIPTION
+FROM (SELECT
+			'{stage_table}'	AS STAGE_TABLE,
+			COUNT(DISTINCT 1) AS FILE_COUNT
+		FROM {stage_schema}.{stage_table} src
+			INNER JOIN {stage_schema}.ETL_FILE_LOAD fl
+				ON fl.SRC_SYSTEM = {column_source_system}
+					AND fl.FILE_NAME = {column_file_name}
+					AND fl.BUSINESS_DT = {column_business_date}) AS FILE_REG
+
+;
+"""
+
+"{stage_table}_ETL_FILE_LOAD" = """
+INSERT INTO {stage_schema}.ETL_FILE_LOAD (
+	SRC_SYSTEM ,
+	FILE_NAME ,
+	BUSINESS_DT ,
+	LOAD_TS
+)
+SELECT DISTINCT
+	{column_source_system} AS SRC_SYSTEM ,
+	{column_file_name} AS FILE_NAME ,
+	{column_business_date} AS BUSINESS_DT ,
+	GETDATE()
+FROM {stage_schema}.{stage_table} src
+;
+"""
+
+"{stage_table}_DQ_FILE_REGISTERED" = """
+INSERT INTO {stage_schema}.DQ_LOG (
+	LOAD_TS,
+	OBJECT,
+    DQ_NAME,
+	METRIC,
+    STATUS,
+	DESCRIPTION
+)
+SELECT DISTINCT
+	GETDATE()
+	, FILE_REG.STAGE_TABLE AS OBJECT
+	, 'CHECK FILE REGISTERED' AS DQ_NAME
+	, FILE_REG.FILE_COUNT AS METRIC
+	, CASE FILE_REG.FILE_COUNT WHEN 1 THEN 'OK' ELSE 'WARN' END AS STATUS
+	, 'CHECK IF FILE HAS BEEN REGISTERED. OK=1 (FILE FOUND)' AS DESCRIPTION
+FROM (SELECT
+			'{stage_table}'	AS STAGE_TABLE,
+			COUNT(DISTINCT 1) AS FILE_COUNT
+		FROM {stage_schema}.{stage_table} src
+			INNER JOIN {stage_schema}.ETL_FILE_LOAD fl
+				ON fl.SRC_SYSTEM = {column_source_system}
+					AND fl.FILE_NAME = {column_file_name}
+					AND fl.BUSINESS_DT = {column_business_date}) AS FILE_REG
+;
+"""
+
+[ODS]
+[ODS.DDL]
+"{ods_table}" = """
+CREATE TABLE IF NOT EXISTS {ods_schema}.{ods_table} (
+	FILE_ID INTEGER NOT NULL,
+	LOAD_TS TIMESTAMP NOT NULL,
+	{columns_definition},
+	PRIMARY KEY (FILE_ID, {columns_pk}) DISABLED
+)
+ORDER BY
+	FILE_ID,
+	{columns_ordered_by}
+{segmentation_clause} ALL NODES
+PARTITION BY {column_partition_by} GROUP BY CALENDAR_HIERARCHY_DAY({column_partition_by}, 1, 2)
+;
+"""
+
+"V_{ods_table}_{stage_table}" = """
+CREATE OR REPLACE VIEW {ods_schema}.V_{ods_table}_{stage_table} AS
+SELECT
+	fl.FILE_ID ,
+	fl.LOAD_TS ,
+	{columns_list_qualified}
+FROM {stage_schema}.{stage_table} src
+	INNER JOIN {stage_schema}.V_ETL_FILE_LOAD fl
+			ON fl.SRC_SYSTEM = {column_source_system}
+				AND fl.FILE_NAME = {column_file_name}
+				AND fl.BUSINESS_DT = {column_business_date}
+	LEFT JOIN {ods_schema}.{ods_table} trg
+		ON fl.FILE_ID = trg.FILE_ID
+WHERE trg.FILE_ID IS NULL
+;
+"""
+
+[ODS.DML]
+"{ods_table}" = """
+INSERT INTO {ods_schema}.{ods_table} (
+	FILE_ID ,
+	LOAD_TS ,
+	{columns_list}
+)
+SELECT
+	src.FILE_ID ,
+	src.LOAD_TS ,
+	{columns_list_qualified}
+FROM {ods_schema}.V_{ods_table}_{stage_table} src
+;
+"""
+
+[DDS]
+[DDS.HUB]
+[DDS.HUB.DDL]
+# DDL_HUB
+"{target_table}" = """
+CREATE TABLE IF NOT EXISTS {target_schema}.{target_table} (
+	HK_{target_table} VARCHAR(32) NOT NULL,
+	FILE_ID INTEGER NOT NULL,
+	LOAD_TS TIMESTAMP NOT NULL,
+	{master_key_def},
+	PRIMARY KEY (HK_{target_table}) ENABLED
+)
+ORDER BY HK_{target_table}
+SEGMENTED BY HASH(HK_{target_table}) ALL NODES
+;
+"""
+
+# DDL_V_HUB
+"V_{target_table}_{source_table}" = """
+CREATE OR REPLACE VIEW {target_schema}.V_{source_table}_{target_table} AS
+SELECT DISTINCT
+	{hash_key} AS HK_{target_table} ,
+	fl.FILE_ID ,
+	fl.LOAD_TS ,
+	{business_key_qualified}
+FROM {source_schema}.{source_table} src
+	INNER JOIN {source_schema}.V_ETL_FILE_LOAD fl
+			ON fl.SRC_SYSTEM = {column_source_system}
+				AND fl.FILE_NAME = {column_file_name}
+				AND fl.BUSINESS_DT = {column_business_date}
+	LEFT JOIN {target_schema}.{target_table} trg
+		ON {hash_key} = trg.HK_{target_table}
+WHERE trg.HK_{target_table} IS NULL
+;
+"""
+[DDS.HUB.DML]
+# DML_HUB
+"{target_table}_{source_table}" = """
+INSERT INTO {target_schema}.{target_table} (
+	HK_{target_table} ,
+	FILE_ID ,
+	LOAD_TS ,
+	{master_key}
+)
+SELECT
+	src.HK_{target_table} ,
+	src.FILE_ID ,
+	src.LOAD_TS ,
+	{business_key_qualified}
+FROM {target_schema}.V_{source_table}_{target_table} src
+;
+"""
+
+[DDS.LINK]
+[DDS.LINK.DDL]
+# DDL_LINK
+"{target_table}" = """
+CREATE TABLE IF NOT EXISTS {target_schema}.{target_table} (
+	HK_{target_table} VARCHAR(32) NOT NULL,
+	{reference_key_def},
+	FILE_ID INTEGER NOT NULL,
+	LOAD_TS TIMESTAMP NOT NULL,
+	PRIMARY KEY (HK_{target_table}) ENABLED
+)
+ORDER BY HK_{target_table}
+SEGMENTED BY HASH(HK_{target_table}) ALL NODES ;
+;
+"""
+
+# DDL_V_LINK
+"V_{target_table}_{source_table}" = """
+CREATE OR REPLACE VIEW {target_schema}.V_{source_table}_{target_table} AS
+SELECT DISTINCT
+	{hash_key} AS HK_{target_table},
+	{reference_key_alias},
+	fl.FILE_ID ,
+	fl.LOAD_TS
+FROM {source_schema}.{source_table} src
+	INNER JOIN {source_schema}.V_ETL_FILE_LOAD fl
+			ON fl.SRC_SYSTEM = {column_source_system}
+				AND fl.FILE_NAME = {column_file_name}
+				AND fl.BUSINESS_DT = {column_business_date}
+	LEFT JOIN {target_schema}.{target_table} trg
+		ON {hash_key} = trg.HK_{target_table}
+WHERE trg.HK_{target_table} IS NULL
+;
+"""
+[DDS.LINK.DML]
+# DML_LINK
+"{target_table}_{source_table}" = """
+INSERT INTO {target_schema}.{target_table} (
+	HK_{target_table},
+	{reference_key},
+	FILE_ID,
+	LOAD_TS
+)
+SELECT
+	HK_{target_table} ,
+	{reference_key},
+	FILE_ID,
+	LOAD_TS
+FROM {target_schema}.V_{source_table}_{target_table} src
+;
+"""
+
+[DDS.SATELLITE]
+[DDS.SATELLITE.DDL]
+# DDL_SATELLITE
+"{target_table}" = """
+CREATE TABLE IF NOT EXISTS {target_schema}.{target_table} (
+	HK_{reference_table} VARCHAR(32) NOT NULL CONSTRAINT HK_{reference_table} REFERENCES {target_schema}.{reference_table} (HK_{reference_table}) ,
+	FILE_ID INTEGER NOT NULL ,
+	LOAD_TS TIMESTAMP NOT NULL ,
+	HASHDIFF VARCHAR(32) NOT NULL ,
+	{attribute_columns_def} ,
+	PRIMARY KEY (HK_{reference_table}, HASHDIFF) ENABLED
+)
+ORDER BY
+	HK_{reference_table} ,
+	LOAD_TS
+SEGMENTED BY HASH(HK_{reference_table}) ALL NODES
+;
+"""
+# DDL_V_SATELLITE_SNAPSHOT
+"V_{target_table}" = """
+CREATE OR REPLACE VIEW {target_schema}.V_{target_table} AS
+SELECT
+	HK_{reference_table} ,
+	FILE_ID ,
+	LOAD_TS ,
+	HASHDIFF ,
+	{attribute_columns}
+FROM {target_schema}.{target_table}
+LIMIT 1 OVER (PARTITION BY HK_{reference_table} ORDER BY LOAD_TS DESC)
+;
+"""
+# DDL_V_SATELLITE
+"V_{target_table}_{source_table}" = """
+CREATE OR REPLACE VIEW {target_schema}.V_{source_table}_{target_table} AS
+SELECT DISTINCT
+	{hash_key} AS HK_{reference_table} ,
+	fl.FILE_ID ,
+	fl.LOAD_TS ,
+	MD5({hash_diff}) AS HASHDIFF ,
+	{attribute_columns_qualified}
+FROM {source_schema}.{source_table} src
+	INNER JOIN {source_schema}.V_ETL_FILE_LOAD fl
+			ON fl.SRC_SYSTEM = {column_source_system}
+				AND fl.FILE_NAME = {column_file_name}
+				AND fl.BUSINESS_DT = {column_business_date}
+	LEFT JOIN {target_schema}.V_{target_table} trg
+		ON {hash_key} = trg.HK_{reference_table}
+			AND MD5({hash_diff}) = trg.HASHDIFF
+WHERE trg.HK_{reference_table} IS NULL
+;
+"""
+
+[DDS.SATELLITE.DML]
+# DML_SATELLITE
+"{target_table}_{source_table}" = """
+INSERT INTO {target_schema}.{target_table} (
+	HK_{reference_table} ,
+	FILE_ID ,
+	LOAD_TS ,
+	HASHDIFF ,
+	{attribute_columns}
+)
+SELECT
+	HK_{reference_table} ,
+	FILE_ID ,
+	LOAD_TS ,
+	HASHDIFF ,
+	{attribute_columns}
+FROM {target_schema}.V_{source_table}_{target_table} src
+;
+"""
